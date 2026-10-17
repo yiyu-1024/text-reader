@@ -98,10 +98,10 @@ button.on { background: #4a90d9; color: #fff; border-color: #4a90d9; }  /* 被�
 }
 
 /* ★【新增①】正文里的"段落"
-   以前整本书是一整块文字，现在每段一个 <p>。
+   以前整本书是一整块文字，现在每行一个 <p>。
    ↓ 这两个值专门给段落用：
    margin-bottom = 段与段之间的距离
-   white-space: pre-wrap = 段落内部还是要保留 txt 的换行（诗歌、表格不会乱） */
+   white-space: pre-wrap = 保留行首的空格（txt 里常用两个全角空格做首行缩进） */
 #readBox p {
   margin: 0 0 0.9em;
   white-space: pre-wrap;
@@ -310,15 +310,24 @@ function renderContent() {
   if (!book) return;
 
   const marked = book.underlines || [];           // 有标记的段落序号
-  const paras = book.content.split(/\n{2,}/);     // 连续空行 = 分段点
+
+  // ★分段规则：一个换行 = 一段结束（不是"两个连续换行"）
+  //   先按换行切开，再把空行丢掉。
+  //   为什么要丢空行？因为空行直接变成 <p> 的话，页面会多出一堆空白盒子，
+  //   鼠标移上去它会亮、点一下还能标出一个"看不见的段"，很怪。
+  const allLines = book.content.split('\n');
+  const paras = [];
+  for (let i = 0; i < allLines.length; i++) {
+    if (allLines[i].trim() !== '') paras.push(allLines[i]);
+  }
 
   readBox.innerHTML = '';                         // 先清空
   for (let i = 0; i < paras.length; i++) {
     const p = document.createElement('p');
     p.dataset.i = i;                              // 记住"我是第几段"，点击时要用
     if (marked.indexOf(i) >= 0) p.className = 'ul';    // 这段有标记 → 带上红线
-    p.textContent = paras[i] || ' ';              // 用 textContent，txt 里的 < > 不会被当成标签
-    readBox.appendChild(p);
+    p.textContent = paras[i];                     // 用 textContent，txt 里的 < > 不会被当成标签
+    readBox.appendChild(p);           //把做好的 p 标签放进阅读容器 readBox。循环结束。
   }
 }
 
@@ -348,7 +357,7 @@ function toggleUnderline(index) {
 
   // 只改这一段自己的 class，不重画整篇。
   // （重画整篇会让滚动位置跳动，读一半的书突然"跳一下"，体验很差）
-  const p = readBox.querySelector('p[data-i="' + index + '"]');
+  const p = readBox.querySelector('p[data-i="' + index + '"]');     //找到当前这个段落p标签
   if (p) p.className = (book.underlines.indexOf(index) >= 0) ? 'ul' : '';
 
   saveData();                                     // 存盘
@@ -364,7 +373,7 @@ readBox.addEventListener('click', function (e) {
   // 如果用户正在拖选文字，这一下是"选字"而不是"点段落"，不要标记
   if (String(window.getSelection()).length > 0) return;
 
-  const p = e.target.closest ? e.target.closest('p[data-i]') : null;
+  const p = e.target.closest ? e.target.closest('p[data-i]') : null; // closest() = 找到离自己最近的某个祖先元素（包括自己），没有就返回null
   if (!p) return;
   toggleUnderline(parseInt(p.dataset.i, 10));
 });
@@ -387,7 +396,7 @@ fileInput.onchange = function () {
     const book = {
       id: Date.now(),                       // 用当前时间戳当身份证号，几乎不会重复
       name: file.name.replace('.txt', ''),  // 文件名去掉 .txt 就是书名
-      content: reader.result.replace(/\r\n/g, '\n'),  // 统一换行符，避免多出空行
+      content: reader.result.replace(/\r\n/g, '\n'),  // 只统一换行符：Windows 的 \r\n 压成 \n（空行不动）
       progress: 0,                          // 读到哪儿了（已滚动的像素）
       percent: 0,                           // 读完的百分比
       underlines: []                        // ★【新增】做了标记的段落序号，例如 [3, 7, 12]
@@ -410,7 +419,7 @@ function openBook(id) {
 
   currentId = id;                             // 记住现在读的是哪本
   localStorage.setItem('lastId', id);         // 存盘：下次打开网页还接着读这本
-  renderContent();                            // ★【改动】按段渲染成 <p>（原来是一整块 textContent）
+  renderContent();                            // ★把正文渲染成一个个 <p>
   readBox.scrollTop = book.progress || 0;     // 滚回上次的位置 ← 进度恢复就靠这一行
 
   tip.textContent = '《' + book.name + '》共 ' + book.content.length + ' 字 · 上次读到 ' + (book.percent || 0) + '%';
@@ -429,7 +438,7 @@ function deleteBook(id) {
 
   if (currentId === id) {          // 删掉的正好是正在读的那本
     currentId = null;
-    showEmptyHint();                    // ★【改动】不要留一片空白（原来是塞 EMPTY_HINT 字符串）
+    showEmptyHint();                    // ★【改动】不要留一片空白
     tip.textContent = '请先导入一个 txt 文件';
   }
   saveData();
@@ -535,7 +544,7 @@ applyTheme();                      // 2. 套用背景色
 applyEye();                        // 3. 套用护眼模式
 setFontSize(settings.fontSize);    // 4. 套用字号
 renderShelf();                     // 5. 画出书架
-showEmptyHint();                   // 6. 正文区先放一句提示，别是空白 ★【改动】
+showEmptyHint();                   // 6. 正文区先放一句提示，别是空白 ★
 
 // 7. 上次读的是哪本？自动打开它，并恢复到上次的位置
 // （如果第 6 步刚放上去的提示还在，说明没有历史记录，就保持显示提示）
