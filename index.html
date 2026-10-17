@@ -59,7 +59,7 @@ body {
 .book.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }  /* 当前在读的那本 */
 .book .percent { font-size: 11px; opacity: 0.75; }
 .book .del { color: #e0554c; margin-left: 8px; font-weight: bold; }
-.book.active .del { color: #ffd7d3; }
+.book.active .del { color: #83150b; }
 
 /* ----- 右栏：阅读区 ----- */
 #main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
@@ -95,7 +95,28 @@ button.on { background: #4a90d9; color: #fff; border-color: #4a90d9; }  /* 被�
   padding: 26px 44px;
   line-height: 1.85;        /* 行距 */
   font-size: 18px;          /* 字号由 JS 改这个值 */
-  white-space: pre-wrap;    /* 关键：保留 txt 里的换行和空格，同时能自动折行 */
+}
+
+/* ★【新增①】正文里的"段落"
+   以前整本书是一整块文字，现在每段一个 <p>。
+   ↓ 这两个值专门给段落用：
+   margin-bottom = 段与段之间的距离
+   white-space: pre-wrap = 段落内部还是要保留 txt 的换行（诗歌、表格不会乱） */
+#readBox p {
+  margin: 0 0 0.9em;
+  white-space: pre-wrap;
+  cursor: pointer;                      /* 鼠标移上去变小手，暗示"这一行能点" */
+  border-radius: 4px;
+  transition: background-color .15s;
+}
+#readBox p:hover { background: rgba(77, 122, 165, 0.3); }
+
+/* ★【新增②】被标记的段落 —— 红色下划线 */
+#readBox p.ul {
+  text-decoration: underline;
+  text-decoration-color: #e0554c;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 4px;
 }
 
 /* ----- 护眼滤镜 ----- */
@@ -173,8 +194,9 @@ const btnEye    = document.getElementById('btnEye');
 
 // 还没有打开任何书的时候，在正文区先放一句话。
 // （不然那块区域是一片空白，很容易让人以为程序坏了）
-const EMPTY_HINT = '这里就是正文区。\n\n' +
-  '点左上角的「选择文件」导入一个 .txt 文件，正文就会显示在这块区域里。';
+// ★【改动】原来这里是一个 EMPTY_HINT 字符串常量。
+//   现在正文改成"一段一个 <p>"了，一个字符串没法自动变成两段，
+//   所以改成调用 showEmptyHint()（定义在下面的 ④-2 里）。
 
 
 /* ---------------------------------------------------------------
@@ -265,6 +287,90 @@ function renderShelf() {
 
 
 /* ---------------------------------------------------------------
+   ④-2 ★【新增】渲染正文 —— 把一本书按"空行"切成一段一段的 <p>
+
+   为什么要分段？
+     原来写的是 readBox.textContent = book.content，整本书是"一整块文字"。
+     浏览器眼里没有"段落"这个东西，你就没法给其中某一段加下划线
+     —— 因为没有可以插标签的位置。
+     分段之后，每段都是一个独立的 <p>，加 class、加点击、加标记全都变得可能。
+   --------------------------------------------------------------- */
+
+// 找到"当前正在读的那本书"。好几个函数都要用，抽出来避免重复代码。
+function currentBook() {
+  for (let i = 0; i < books.length; i++) {
+    if (books[i].id === currentId) return books[i];
+  }
+  return null;               // 没在读任何书
+}
+
+// 把正文渲染成一个个 <p>
+function renderContent() {
+  const book = currentBook();
+  if (!book) return;
+
+  const marked = book.underlines || [];           // 有标记的段落序号
+  const paras = book.content.split(/\n{2,}/);     // 连续空行 = 分段点
+
+  readBox.innerHTML = '';                         // 先清空
+  for (let i = 0; i < paras.length; i++) {
+    const p = document.createElement('p');
+    p.dataset.i = i;                              // 记住"我是第几段"，点击时要用
+    if (marked.indexOf(i) >= 0) p.className = 'ul';    // 这段有标记 → 带上红线
+    p.textContent = paras[i] || ' ';              // 用 textContent，txt 里的 < > 不会被当成标签
+    readBox.appendChild(p);
+  }
+}
+
+// 没有打开任何书时的提示（原来只是往 textContent 里塞一段字符串，现在要两段）
+function showEmptyHint() {
+  readBox.innerHTML = '';
+  const p1 = document.createElement('p');
+  p1.textContent = '这里就是正文区。';
+  const p2 = document.createElement('p');
+  p2.textContent = '点左上角的「选择文件」导入一个 .txt 文件，正文就会显示在这块区域里。';
+  readBox.appendChild(p1);
+  readBox.appendChild(p2);
+}
+
+/* 点一下某一段 → 给它加上 / 去掉下划线
+   标记存在哪？就存在书对象自己身上：book.underlines = [3, 7]
+   好处：saveData() 里是 JSON.stringify(books)，会连同 underlines 一起存进 localStorage，
+        第 ③ 节那个存储层一行代码都不用改。 */
+function toggleUnderline(index) {
+  const book = currentBook();
+  if (!book) return;
+  if (!book.underlines) book.underlines = [];     // 老数据没这个字段，兜个底
+
+  const pos = book.underlines.indexOf(index);
+  if (pos >= 0) book.underlines.splice(pos, 1);   // 已经有 → 取消
+  else book.underlines.push(index);               // 还没有 → 加上
+
+  // 只改这一段自己的 class，不重画整篇。
+  // （重画整篇会让滚动位置跳动，读一半的书突然"跳一下"，体验很差）
+  const p = readBox.querySelector('p[data-i="' + index + '"]');
+  if (p) p.className = (book.underlines.indexOf(index) >= 0) ? 'ul' : '';
+
+  saveData();                                     // 存盘
+
+  const on = book.underlines.indexOf(index) >= 0;
+  tip.textContent = (on ? '已标记第 ' : '已取消第 ') + (index + 1) + ' 段的标记' +
+                    ' · 全书共 ' + book.underlines.length + ' 段有标记';
+}
+
+// 点正文里任意一段
+readBox.addEventListener('click', function (e) {
+  if (currentId === null) return;
+  // 如果用户正在拖选文字，这一下是"选字"而不是"点段落"，不要标记
+  if (String(window.getSelection()).length > 0) return;
+
+  const p = e.target.closest ? e.target.closest('p[data-i]') : null;
+  if (!p) return;
+  toggleUnderline(parseInt(p.dataset.i, 10));
+});
+
+
+/* ---------------------------------------------------------------
    ⑤ 六个功能的实现
    --------------------------------------------------------------- */
 
@@ -283,7 +389,8 @@ fileInput.onchange = function () {
       name: file.name.replace('.txt', ''),  // 文件名去掉 .txt 就是书名
       content: reader.result.replace(/\r\n/g, '\n'),  // 统一换行符，避免多出空行
       progress: 0,                          // 读到哪儿了（已滚动的像素）
-      percent: 0                            // 读完的百分比
+      percent: 0,                           // 读完的百分比
+      underlines: []                        // ★【新增】做了标记的段落序号，例如 [3, 7, 12]
     };
     books.push(book);      // 放进书架
     saveData();            // 存盘
@@ -303,7 +410,7 @@ function openBook(id) {
 
   currentId = id;                             // 记住现在读的是哪本
   localStorage.setItem('lastId', id);         // 存盘：下次打开网页还接着读这本
-  readBox.textContent = book.content;         // 把正文灌进去（用 textContent 是纯文本，更安全）
+  renderContent();                            // ★【改动】按段渲染成 <p>（原来是一整块 textContent）
   readBox.scrollTop = book.progress || 0;     // 滚回上次的位置 ← 进度恢复就靠这一行
 
   tip.textContent = '《' + book.name + '》共 ' + book.content.length + ' 字 · 上次读到 ' + (book.percent || 0) + '%';
@@ -322,7 +429,7 @@ function deleteBook(id) {
 
   if (currentId === id) {          // 删掉的正好是正在读的那本
     currentId = null;
-    readBox.textContent = EMPTY_HINT;   // 不要留一片空白
+    showEmptyHint();                    // ★【改动】不要留一片空白（原来是塞 EMPTY_HINT 字符串）
     tip.textContent = '请先导入一个 txt 文件';
   }
   saveData();
@@ -428,7 +535,7 @@ applyTheme();                      // 2. 套用背景色
 applyEye();                        // 3. 套用护眼模式
 setFontSize(settings.fontSize);    // 4. 套用字号
 renderShelf();                     // 5. 画出书架
-readBox.textContent = EMPTY_HINT;  // 6. 正文区先放一句提示，别是空白
+showEmptyHint();                   // 6. 正文区先放一句提示，别是空白 ★【改动】
 
 // 7. 上次读的是哪本？自动打开它，并恢复到上次的位置
 // （如果第 6 步刚放上去的提示还在，说明没有历史记录，就保持显示提示）
