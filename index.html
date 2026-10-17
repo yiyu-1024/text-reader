@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">  
+<!-- 下面这行是一个空图标，只是为了不让浏览器在控制台报 favicon 404，可忽略 -->
+<link rel="icon" href="data:,">
+<title>我的阅读器（基础版）</title>
+
+<style>
+/* =====================================================================
+   【第一部分】CSS —— 只负责"页面长什么样"
+   你不需要全看懂，先知道：这一段决定颜色、大小、位置。
+   真正要读的代码在页面最下面的 JavaScript 区域里。
+   ===================================================================== */
+
+/* 用两个"变量"来存页面颜色。以后只改这两个变量的值，整页颜色就跟着变。
+   用法：background: var(--bg); 意思是"背景色用 --bg 这个变量的值"。 */
+:root {
+  --bg: #ffffff;     /* 背景色 */
+  --fg: #222222;     /* 文字色 */
+}
+
+* { box-sizing: border-box; }   /* 让 padding 不会把盒子撑大 */
+
+body {
+  margin: 0;
+  height: 100vh;              /* 100vh = 屏幕高度的 100%，铺满整屏 */
+  display: flex;              /* flex = 弹性布局，让子元素"横向排队" */
+  font-family: "Microsoft YaHei", sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  transition: background-color 1s, color 1s;   /* 换色时缓慢过渡，不刺眼 */
+}
+
+/* ----- 左栏：书架 ----- */
+#shelf {
+  width: 240px;
+  flex: 0 0 240px;            /* 固定 240px 宽，不参与伸长缩短 */
+  display: flex;
+  flex-direction: column;     /* 里面的东西改成"竖着排队" */
+  border-right: 1px solid rgba(128, 128, 128, 0.35);
+  background: rgba(128, 128, 128, 0.07);   /* 半透明灰，浅色深色背景都好看 */
+}
+#shelf h2 { font-size: 16px; margin: 14px 14px 8px; }
+#bookList { flex: 1; overflow-y: auto; padding: 0 10px 10px; }  /* 书太多时这里自己滚动 */
+
+.book {
+  display: flex;
+  justify-content: space-between;   /* 主轴对齐，书名靠左，百分比和 × 靠右 */
+  align-items: center;   /* 交叉轴对齐，垂直居中 */
+  padding: 8px 10px;
+  margin-bottom: 6px;
+  border: 1px solid rgba(128, 128, 128, 0.3);
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;           /* 鼠标移上去变成小手，暗示"可以点" */
+}
+.book:hover { border-color: #4a90d9; }·   /*鼠标悬浮伪类，移动到书目上边框变蓝*/
+.book.active { background: #4a90d9; color: #fff; border-color: #4a90d9; }  /* 当前在读的那本 */
+.book .percent { font-size: 11px; opacity: 0.75; }
+.book .del { color: #e0554c; margin-left: 8px; font-weight: bold; }
+.book.active .del { color: #ffd7d3; }
+
+/* ----- 右栏：阅读区 ----- */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+#toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 10px 16px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.35);
+}
+button {
+  padding: 5px 11px;
+  font-size: 13px;
+  font-family: inherit;
+  color: inherit;
+  background: rgba(128, 128, 128, 0.12);
+  border: 1px solid rgba(128, 128, 128, 0.35);
+  border-radius: 6px;
+  cursor: pointer;
+}
+button:hover { border-color: #4a90d9; }
+button.on { background: #4a90d9; color: #fff; border-color: #4a90d9; }  /* 被按下的状态 */
+
+/* 背景色的小圆点按钮 */
+.dot { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(128,128,128,0.5); cursor: pointer; }
+.dot.on { border-color: #4a90d9; box-shadow: 0 0 0 2px #4a90d9 inset; }
+
+.tip { font-size: 12px; opacity: 0.7; margin-left: auto; }
+
+/* ----- 正文盒子：整个阅读器最简单的核心 ----- */
+#readBox {
+  flex: 1;                  /* 把剩下的高度全占了 */
+  overflow-y: auto;         /* 内容超过高度，自动出现滚动条 */
+  padding: 26px 44px;
+  line-height: 1.85;        /* 行距 */
+  font-size: 18px;          /* 字号由 JS 改这个值 */
+  white-space: pre-wrap;    /* 关键：保留 txt 里的换行和空格，同时能自动折行 */
+}
+
+/* ----- 护眼滤镜 ----- */
+#mask {
+  position: fixed;          /* 固定定位，铺满整个窗口 */
+  top: 0; right: 0; bottom: 0; left: 0;
+  background: rgba(255, 190, 90, 0.16);   /* 淡淡的暖黄色 */
+  pointer-events: none;     /* 关键：让鼠标"穿过"它，不挡住下面的点击 */
+  opacity: 0;               /* 默认看不见 */
+  transition: opacity 1s;
+}
+body.eye #mask { opacity: 1; }   /* body 上有 eye 这个 class 时，滤镜才显示出来 */
+</style>
+</head>
+
+<body>
+
+<!-- =====================================================================
+     【第二部分】HTML —— 只负责"页面上有什么"
+     每个元素都给了 id（身份证号），JS 靠 id 找到它们。
+     ===================================================================== -->
+
+<!-- 左栏：书架 -->
+<div id="shelf">
+  <h2>我的书架</h2>
+  <div style="padding: 0 10px 10px">
+    <!-- accept=".txt" 表示文件选择框里只显示 txt 文件 -->
+    <input type="file" id="fileInput" accept=".txt">
+  </div>
+  <div id="bookList"></div>   <!-- 书的列表由 JS 生成，所以这里是空的 -->
+</div>
+
+<!-- 右栏：阅读区 -->
+<div id="main">
+  <div id="toolbar">
+    <button id="btnMinus">A-</button>
+    <button id="btnPlus">A+</button>
+    <span id="fontTip" style="font-size: 12px">18px</span>
+
+    <span style="width:1px; height:18px; background:rgba(128,128,128,.4)"></span>
+
+    <!-- 背景色：data-bg 是背景色，data-fg 是配套的文字色 -->
+    <span class="dot" data-bg="#ffffff" data-fg="#222222" style="background:#ffffff" title="白色"></span>
+    <span class="dot" data-bg="#f5ecd9" data-fg="#4a3b28" style="background:#f5ecd9" title="米黄"></span>
+    <span class="dot" data-bg="#c7edcc" data-fg="#22392a" style="background:#c7edcc" title="豆沙绿"></span>
+    <span class="dot" data-bg="#333333" data-fg="#e8e8e8" style="background:#333333" title="深色"></span>
+
+    <button id="btnEye">护眼模式</button>
+    <span class="tip" id="tip">请先导入一个 txt 文件</span>
+  </div>
+  <div id="readBox"></div>   <!-- 正文放这里 -->
+</div>
+
+<div id="mask"></div>   <!-- 护眼滤镜层 -->
+
+<script>
+/* =====================================================================
+   【第三部分】JavaScript —— 负责"怎么动"
+   建议按 ① → ② → ③ → ④ → ⑤ → ⑥ 的顺序阅读。
+   ===================================================================== */
+
+
+/* ---------------------------------------------------------------
+   ① 先"抓住"页面上要用到的元素，存到变量里备用
+      getElementById('xxx') = 找到 id 是 xxx 的那个元素
+   --------------------------------------------------------------- */
+const fileInput = document.getElementById('fileInput');
+const bookList  = document.getElementById('bookList');
+const readBox   = document.getElementById('readBox');
+const tip       = document.getElementById('tip');
+const fontTip   = document.getElementById('fontTip');
+const btnMinus  = document.getElementById('btnMinus');
+const btnPlus   = document.getElementById('btnPlus');
+const btnEye    = document.getElementById('btnEye');
+
+// 还没有打开任何书的时候，在正文区先放一句话。
+// （不然那块区域是一片空白，很容易让人以为程序坏了）
+const EMPTY_HINT = '这里就是正文区。\n\n' +
+  '点左上角的「选择文件」导入一个 .txt 文件，正文就会显示在这块区域里。';
+
+
+/* ---------------------------------------------------------------
+   ② 数据 —— 整个程序最重要的东西，只有下面三个变量
+      页面只是"数据的影子"：数据变了，重新画一次页面就行。
+   --------------------------------------------------------------- */
+
+// 书架：一个"数组"，里面一本一本地放着书
+// 每本书是一个"对象"，长这样：
+// { id: 1699999999999, name: "三国演义", content: "……全文……", progress: 0, percent: 0 }
+let books = [];
+
+// 当前的阅读设置
+let settings = {
+  fontSize: 18,      // 字号
+  bg: '#ffffff',     // 背景色
+  fg: '#222222',     // 文字色
+  eye: false         // 护眼模式开没开
+};
+
+// 当前正在读的是哪本书（存书的 id，没在读就是 null）
+let currentId = null;
+
+
+/* ---------------------------------------------------------------
+   ③ 存盘与读盘 —— localStorage
+      localStorage 只能存"字符串"，所以：
+        存：把对象变成字符串   JSON.stringify(对象)
+        读：把字符串变回对象   JSON.parse(字符串)
+   --------------------------------------------------------------- */
+function saveData() {
+  localStorage.setItem('books', JSON.stringify(books));
+  localStorage.setItem('settings', JSON.stringify(settings));
+}
+
+function loadData() {
+  const booksText = localStorage.getItem('books');
+  const settingsText = localStorage.getItem('settings');
+
+  if (booksText) {
+    books = JSON.parse(booksText);
+  }
+  if (settingsText) {
+    // 用 Object.assign 把存档的值"覆盖"到默认设置上。
+    // 好处：以后新增设置项时，老存档缺的字段还能用默认值，不会变成 undefined。
+    Object.assign(settings, JSON.parse(settingsText));
+  }
+}
+
+
+/* ---------------------------------------------------------------
+   ④ 渲染书架 —— 把 books 数组"画"成左边那一列
+      渲染 = 根据数据重新生成 HTML
+   --------------------------------------------------------------- */
+function renderShelf() {
+  bookList.innerHTML = '';   // 先清空，再重新画（简单粗暴但最好理解）
+
+  if (books.length === 0) {
+    bookList.innerHTML = '<p style="font-size:12px;opacity:.65;padding:0 6px">书架还是空的，点上面的按钮导入一个 txt 吧。</p>';
+    return;
+  }
+
+  for (let i = 0; i < books.length; i++) {
+    const book = books[i];
+
+    const div = document.createElement('div');
+    // 正在读的那本加上 active，CSS 里会给它蓝色背景
+    div.className = 'book' + (book.id === currentId ? ' active' : '');
+    div.innerHTML =
+      '<span>' + book.name + '</span>' +
+      '<span><span class="percent">' + (book.percent || 0) + '%</span>' +
+      '<span class="del">×</span></span>';
+
+    // 点整行 → 打开这本书
+    div.onclick = function () {
+      openBook(book.id);
+    };
+
+    // 点右边的 × → 删除
+    div.querySelector('.del').onclick = function (event) {
+      event.stopPropagation();   // 阻止事件往外冒，否则会顺手触发上面的"打开"
+      deleteBook(book.id);
+    };
+
+    bookList.appendChild(div);
+  }
+}
+
+
+/* ---------------------------------------------------------------
+   ⑤ 六个功能的实现
+   --------------------------------------------------------------- */
+
+/* 功能 1：导入 txt
+   题目要求编码选 UTF-8，就是 readAsText 的第二个参数。 */
+fileInput.onchange = function () {
+  const file = fileInput.files[0];
+  if (!file) return;
+
+  const reader = new FileReader();          // FileReader = 浏览器自带的"读文件工具"
+  reader.readAsText(file, 'UTF-8');         // ← 这里指定编码
+
+  reader.onload = function () {             // 读完了才会执行这里
+    const book = {
+      id: Date.now(),                       // 用当前时间戳当身份证号，几乎不会重复
+      name: file.name.replace('.txt', ''),  // 文件名去掉 .txt 就是书名
+      content: reader.result.replace(/\r\n/g, '\n'),  // 统一换行符，避免多出空行
+      progress: 0,                          // 读到哪儿了（已滚动的像素）
+      percent: 0                            // 读完的百分比
+    };
+    books.push(book);      // 放进书架
+    saveData();            // 存盘
+    renderShelf();         // 重画书架
+    openBook(book.id);     // 导入完直接打开它
+    fileInput.value = '';  // 清空选择框，方便再次导入同一个文件
+  };
+};
+
+/* 功能 2：打开一本书（含"选择"效果） */
+function openBook(id) {
+  let book = null;
+  for (let i = 0; i < books.length; i++) {
+    if (books[i].id === id) book = books[i];
+  }
+  if (!book) return;
+
+  currentId = id;                             // 记住现在读的是哪本
+  localStorage.setItem('lastId', id);         // 存盘：下次打开网页还接着读这本
+  readBox.textContent = book.content;         // 把正文灌进去（用 textContent 是纯文本，更安全）
+  readBox.scrollTop = book.progress || 0;     // 滚回上次的位置 ← 进度恢复就靠这一行
+
+  tip.textContent = '《' + book.name + '》共 ' + book.content.length + ' 字 · 上次读到 ' + (book.percent || 0) + '%';
+  renderShelf();                              // 重画书架，让这本高亮
+}
+
+/* 功能 2 的删除部分 */
+function deleteBook(id) {
+  if (!confirm('确定要从书架里删掉这本书吗？')) return;   // confirm 会弹出一个确认框
+
+  const rest = [];
+  for (let i = 0; i < books.length; i++) {
+    if (books[i].id !== id) rest.push(books[i]);          // 除了这本，其它都留下
+  }
+  books = rest;
+
+  if (currentId === id) {          // 删掉的正好是正在读的那本
+    currentId = null;
+    readBox.textContent = EMPTY_HINT;   // 不要留一片空白
+    tip.textContent = '请先导入一个 txt 文件';
+  }
+  saveData();
+  renderShelf();
+}
+
+/* 功能 3：字号调节 */
+function setFontSize(size) {
+  // 限制在 12 ~ 40 之间，防止点太多次变得没法看
+  if (size < 12) size = 12;
+  if (size > 40) size = 40;
+
+  settings.fontSize = size;
+  readBox.style.fontSize = size + 'px';   // 直接改 CSS
+  fontTip.textContent = size + 'px';
+  saveData();
+}
+btnMinus.onclick = function () { setFontSize(settings.fontSize - 2); };
+btnPlus.onclick  = function () { setFontSize(settings.fontSize + 2); };
+
+/* 功能 4：背景色调整
+   做法：给 body 的两个 CSS 变量换值，整页颜色跟着变。 */
+const dots = document.querySelectorAll('.dot');   // querySelectorAll = 选中所有 class 等于 dot 的页面元素
+
+function applyTheme() {
+  document.body.style.setProperty('--bg', settings.bg);
+  document.body.style.setProperty('--fg', settings.fg);
+
+  // 再给"当前选中的那个颜色"加个蓝圈
+  for (let i = 0; i < dots.length; i++) {
+    const isCurrent = (dots[i].dataset.bg === settings.bg); // 用来存判断结果：true或false
+    dots[i].className = isCurrent ? 'dot on' : 'dot';// 如果是当前选中的颜色，就加上 on 这个 class，否则去掉
+  }
+}
+
+for (let i = 0; i < dots.length; i++) {
+  dots[i].onclick = function () {
+    settings.bg = dots[i].dataset.bg;   // dataset.bg 读的就是 HTML 里的 data-bg
+    settings.fg = dots[i].dataset.fg;
+    applyTheme();
+    saveData();
+  };
+}
+
+/* 功能 5：护眼模式
+   做法：给 body 加一个 eye 的 class，CSS 里的 #mask 就显示出来了。
+   它和背景色是两回事——背景色换纸，护眼模式是"盖一层暖色玻璃"。 */
+function applyEye() {
+  if (settings.eye) {
+    document.body.className = 'eye';
+    btnEye.className = 'on';
+  } else {
+    document.body.className = '';
+    btnEye.className = '';
+  }
+}
+btnEye.onclick = function () {
+  settings.eye = !settings.eye;   // 取反：真变假、假变真
+  applyEye();//调用 applyEye，页面立刻加上或去掉暖色遮罩
+  saveData();
+};
+
+/* 功能 6：阅读进度保存
+   滚动时如果每一像素都存盘，会疯狂写硬盘。
+   所以用一个小技巧：滚动时先"倒计时"，停手 0.5 秒后才真正保存。 */
+let saveTimer = null;
+
+readBox.addEventListener('scroll', function () {  //给阅读框绑定滚动事件
+  if (currentId === null) return;
+  clearTimeout(saveTimer);                  // 取消上一次的倒计时，快速滚动的时候，不要频繁保存，防抖。
+  saveTimer = setTimeout(saveProgress, 500); // 重新倒计时 0.5 秒
+});
+
+function saveProgress() {
+  if (currentId === null) return;
+
+  // 能滚动的总距离 = 内容总高 - 窗口高度
+  const max = readBox.scrollHeight - readBox.clientHeight;
+  const percent = max > 0 ? Math.round(readBox.scrollTop / max * 100) : 100;  //scrollTop：已经向下滚动了多少像素
+
+  for (let i = 0; i < books.length; i++) {
+    if (books[i].id === currentId) {
+      books[i].progress = readBox.scrollTop;   // 记住像素位置
+      books[i].percent = percent;              // 记住百分比
+      // 提示栏里把书名和进度拼成一句话。
+      // （如果只写"已保存进度 xx%"，书名那行字就被顶掉了，看起来像"刚才的字消失了"）
+      tip.textContent = '《' + books[i].name + '》共 ' + books[i].content.length +
+                        ' 字 · 已保存进度 ' + percent + '%';
+      break;
+    }
+  }
+
+  saveData();
+  renderShelf();    // 让左边书架的百分比实时更新
+}
+
+
+/* ---------------------------------------------------------------
+   ⑥ 启动 —— 程序从这里开始跑  读数据 → 套颜色 → 套护眼 → 套字号 → 画书架 → 打开上次那本书。
+   --------------------------------------------------------------- */
+loadData();                        // 1. 把上次的数据读出来
+applyTheme();                      // 2. 套用背景色
+applyEye();                        // 3. 套用护眼模式
+setFontSize(settings.fontSize);    // 4. 套用字号
+renderShelf();                     // 5. 画出书架
+readBox.textContent = EMPTY_HINT;  // 6. 正文区先放一句提示，别是空白
+
+// 7. 上次读的是哪本？自动打开它，并恢复到上次的位置
+// （如果第 6 步刚放上去的提示还在，说明没有历史记录，就保持显示提示）
+const lastId = Number(localStorage.getItem('lastId')); //lastId存的是上次关闭阅读器时正在看的那本书的id
+if (lastId) {
+  openBook(lastId);
+}
+</script>
+
+</body>
+</html>
