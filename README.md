@@ -22,7 +22,7 @@
 
 ### 方式 2：在线演示
 
-部署地址：`（GitHub Pages 开启后填入）`
+部署地址：https://yiyu-1024.github.io/text-reader/
 
 ---
 
